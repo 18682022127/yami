@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql
+    container_name: mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: a123456
+      MYSQL_DATABASE: nacos_config # 提前创建一个空库供 Nacos 使用
+    command: 
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - ./mysql/init:/docker-entrypoint-initdb.d # 挂载初始化脚本，容器首次启动时会自动执行
+      - ./mysql/data:/var/lib/mysql              # 数据持久化
+    ports:
+      - "3306:3306"
+    networks:
+      - default_net
+
+  redis:
+    image: redis
+    container_name: redis
+    restart: always
+    command: redis-server --requirepass 123456
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis/data:/data
+    networks:
+      - default_net
+
+  nacos:
+    image: nacos/nacos-server
+    container_name: nacos
+    restart: always
+    environment:
+      - MODE=standalone # 单机模式运行
+      # MySQL 数据源配置
+      - SPRING_DATASOURCE_PLATFORM=mysql
+      - MYSQL_SERVICE_HOST=mysql
+      - MYSQL_SERVICE_PORT=3306
+      - MYSQL_SERVICE_DB_NAME=nacos_config
+      - MYSQL_SERVICE_USER=root
+      - MYSQL_SERVICE_PASSWORD=a123456
+      # 鉴权相关（Nacos 2.x 版本强制要求配置 secret.key）
+      - NACOS_AUTH_ENABLE=true
+      - NACOS_AUTH_TOKEN=SecretKey012345678901234567890123456789012345678901234567890123456789
+      - NACOS_AUTH_IDENTITY_KEY=nacos
+      - NACOS_AUTH_IDENTITY_VALUE=nacos
+    ports:
+      - "8848:8848" # Nacos 主端口
+      - "9848:9848" # Nacos 2.x gRPC 客户端端口
+      - "19849:9849" # Nacos 2.x gRPC 服务端端口
+      - "8080:8080" 
+    depends_on:
+      - mysql
+    networks:
+      - default_net
+
+networks:
+  default_net:
+    driver: bridge
