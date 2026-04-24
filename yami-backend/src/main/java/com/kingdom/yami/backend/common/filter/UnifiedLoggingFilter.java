@@ -81,7 +81,7 @@ public class UnifiedLoggingFilter extends OncePerRequestFilter {
 
 	private String buildRequestBody(ContentCachingRequestWrapper req) {
 		String contentType = req.getContentType();
-		if (!isTextContent(contentType)) {
+		if (isTextContent(contentType)) {
 			return "[non-text]";
 		}
 
@@ -97,7 +97,7 @@ public class UnifiedLoggingFilter extends OncePerRequestFilter {
 
 	private String buildResponseBody(ContentCachingResponseWrapper res) {
 		String contentType = res.getContentType();
-		if (!isTextContent(contentType)) {
+		if (isTextContent(contentType)) {
 			return "[non-text]";
 		}
 
@@ -113,16 +113,16 @@ public class UnifiedLoggingFilter extends OncePerRequestFilter {
 
 	private boolean isTextContent(String contentType) {
 		if (!StringUtils.hasText(contentType)) {
-			return false;
+			return true;
 		}
 		String ct = contentType.toLowerCase();
 		if (ct.contains("multipart")) {
-			return false;
+			return true;
 		}
-		return ct.contains("json")
-				|| ct.contains("xml")
-				|| ct.startsWith("text/")
-				|| ct.contains("application/x-www-form-urlencoded");
+		return !ct.contains("json")
+				&& !ct.contains("xml")
+				&& !ct.startsWith("text/")
+				&& !ct.contains("application/x-www-form-urlencoded");
 	}
 
 	private String truncate(String str) {
