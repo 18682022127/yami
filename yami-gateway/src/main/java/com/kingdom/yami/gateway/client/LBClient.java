@@ -1,7 +1,6 @@
 package com.kingdom.yami.gateway.client;
 
-import com.kingdom.yami.common.web.ApiResponse;
-import com.kingdom.yami.gateway.filter.crypto.GetEncKeyBySessionIdRequest;
+import org.springframework.cloud.client.loadbalancer.LoadBalancerInterceptor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.http.HttpHeaders;
@@ -12,12 +11,15 @@ public class LBClient {
 
     private final RestClient restClient;
 
-    public LBClient(RestClient.Builder loadBalancedBuilder) {
-        this.restClient = loadBalancedBuilder.build();
+    public LBClient(RestClient.Builder defaultBuilder, LoadBalancerInterceptor lbInterceptor) {
+
+
+        this.restClient = defaultBuilder.clone()
+                .requestInterceptor(lbInterceptor)
+                .build();
     }
 
-    public <T> T call(Object params,String url,Class<T> clazz) {
-
+    public <T> T call(Object params, String url, Class<T> clazz) {
         return restClient.post()
                 .uri(url)
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)

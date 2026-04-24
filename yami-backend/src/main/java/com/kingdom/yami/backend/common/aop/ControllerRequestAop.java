@@ -20,12 +20,4 @@ public class ControllerRequestAop {
 		return pjp.proceed();
 	}
 
-	private ResponseEntity<Map<String, Object>> illegalResponse() {
-		Map<String, Object> resp = new LinkedHashMap<>();
-		resp.put("code", "999999");
-		resp.put("message", "请求非法");
-		resp.put("data", null);
-		resp.put("timeStamp", String.valueOf(Instant.now().toEpochMilli()));
-		return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(resp);
-	}
 }
