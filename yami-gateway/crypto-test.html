@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gateway 加密通信示例</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            margin: 10px 0;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Gateway 加密通信测试工具</h1>
+
+    <div class="section">
+        <h2>1. 登录获取密钥</h2>
+        <input type="text" id="phone" placeholder="手机号" value="13800138000">
+        <input type="text" id="code" placeholder="验证码" value="123456">
+        <button onclick="login()">登录</button>
+        <div id="loginResult"></div>
+    </div>
+
+    <div class="section">
+        <h2>2. 发送加密请求</h2>
+        <textarea id="requestData" placeholder='输入JSON数据，例如: {"userId": 123}'></textarea>
+        <button onclick="sendEncryptedRequest()">发送加密请求</button>
+        <div id="requestResult"></div>
+    </div>
+
+    <div class="section">
+        <h2>3. 当前会话信息</h2>
+        <pre id="sessionInfo">未登录</pre>
+    </div>
+
+    <script>
+        const GATEWAY_URL = 'http://localhost:8083';
+
+        // AES-GCM 加密函数（可选 AAD）
+        async function encryptData(plaintext, base64Key, aadText) {
+            const keyBytes = Uint8Array.from(atob(base64Key), c => c.charCodeAt(0));
+            const key = await crypto.subtle.importKey(
+                'raw',
+                keyBytes,
+                { name: 'AES-GCM' },
+                false,
+                ['encrypt']
+            );
+
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const plainBytes = new TextEncoder().encode(plaintext);
+            const aadBytes = aadText ? new TextEncoder().encode(aadText) : undefined;
+
+            const ciphertext = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: iv, additionalData: aadBytes },
+                key,
+                plainBytes
+            );
+
+            const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+            combined.set(iv);
+            combined.set(new Uint8Array(ciphertext), iv.length);
+
+            return btoa(String.fromCharCode(...combined));
+        }
+
+        // AES-GCM 解密函数（可选 AAD）
+        async function decryptData(encryptedBase64, base64Key, aadText) {
+            const keyBytes = Uint8Array.from(atob(base64Key), c => c.charCodeAt(0));
+            const key = await crypto.subtle.importKey(
+                'raw',
+                keyBytes,
+                { name: 'AES-GCM' },
+                false,
+                ['decrypt']
+            );
+
+            const combined = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
+            const iv = combined.slice(0, 12);
+            const ciphertext = combined.slice(12);
+            const aadBytes = aadText ? new TextEncoder().encode(aadText) : undefined;
+
+            const plainBytes = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: iv, additionalData: aadBytes },
+                key,
+                ciphertext
+            );
+
+            return new TextDecoder().decode(plainBytes);
+        }
+
+        // 登录
+        async function login() {
+            const phone = document.getElementById('phone').value;
+            const code = document.getElementById('code').value;
+            const resultDiv = document.getElementById('loginResult');
+
+            try {
+                const response = await fetch(`${GATEWAY_URL}/ymb/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone, code })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                }
+
+                const data = await response.json();
+
+                // 保存到 localStorage
+                localStorage.setItem('sessionId', data.data.sessionId);
+                localStorage.setItem('sessionEncKey', data.data.sessionEncKey);
+                localStorage.setItem('token', data.data.token);
+
+                resultDiv.innerHTML = `<p class="success">登录成功！</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+                updateSessionInfo();
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">登录失败: ${error.message}</p>`;
+            }
+        }
+
+        // 发送加密请求
+        async function sendEncryptedRequest() {
+            const requestData = document.getElementById('requestData').value;
+            const resultDiv = document.getElementById('requestResult');
+
+            const sessionId = localStorage.getItem('sessionId');
+            const sessionEncKey = localStorage.getItem('sessionEncKey');
+            const token = localStorage.getItem('token');
+
+            if (!sessionId || !sessionEncKey) {
+                resultDiv.innerHTML = '<p class="error">请先登录</p>';
+                return;
+            }
+
+            try {
+                // 验证JSON格式
+                JSON.parse(requestData);
+
+                const nonce = crypto.randomUUID();
+                const ts = Math.floor(Date.now() / 1000).toString();
+
+                // 计算 AAD：method + "\n" + fullPath + "\n" + sessionId + "\n" + nonce + "\n" + ts
+                const urlObj = new URL(`${GATEWAY_URL}/ymb/index/test`);
+                const fullPath = urlObj.pathname + (urlObj.search || "");
+                const aad = `POST\n${fullPath}\n${sessionId}\n${nonce}\n${ts}`;
+
+                // 加密请求数据（带 AAD）
+                const encryptedBody = await encryptData(requestData, sessionEncKey, aad);
+
+                resultDiv.innerHTML = `<p>加密后的数据:</p><pre>${encryptedBody}...</pre>`;
+
+                // 发送请求
+                const response = await fetch(`${GATEWAY_URL}/ymb/index/test`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain',
+                        'X-Session-Id': sessionId,
+                        'X-Nonce': nonce,
+                        'X-Timestamp': ts,
+                        'Authorization': 'Bearer '+ token,
+                    },
+                    body: encryptedBody
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    const decryptedResponse = await decryptData(errorText, sessionEncKey, aad);
+                    throw new Error(`HTTP ${response.status}: ${errorText}: ${decryptedResponse}`);
+                }
+
+                // 解密响应（带同一份 AAD）
+                const encryptedResponse = await response.text();
+                const decryptedResponse = await decryptData(encryptedResponse, sessionEncKey, aad);
+
+                resultDiv.innerHTML += `<p class="success">请求成功！</p>
+                    <p>原始响应:</p>
+                    <pre>${encryptedResponse}</pre>
+                    <p>解密后的响应:</p>
+                    <pre>${JSON.stringify(JSON.parse(decryptedResponse), null, 2)}</pre>`;
+
+            } catch (error) {
+                resultDiv.innerHTML += `<p class="error">请求失败: ${error.message}</p>`;
+            }
+        }
+
+        // 更新会话信息显示
+        function updateSessionInfo() {
+            const sessionId = localStorage.getItem('sessionId');
+            const sessionEncKey = localStorage.getItem('sessionEncKey');
+            const token = localStorage.getItem('token');
+
+            if (sessionId) {
+                document.getElementById('sessionInfo').textContent =
+                    `Session ID: ${sessionId}\n` +
+                    `Session Key: ${sessionEncKey?.substring(0, 20)}...\n` +
+                    `Token: ${token?.substring(0, 50)}...`;
+            }
+        }
+
+        // 页面加载时更新会话信息
+        updateSessionInfo();
+    </script>
+</body>
+</html>
